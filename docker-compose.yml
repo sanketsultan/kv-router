@@ -1,0 +1,59 @@
+version: "3.9"
+
+services:
+  backend-0:
+    build:
+      context: .
+      dockerfile: simulator/Dockerfile
+    environment:
+      PORT: "8001"
+      BACKEND_ID: "backend-0"
+      HIT_TTFT_MIN: "80"
+      HIT_TTFT_MAX: "120"
+      MISS_TTFT_MIN: "600"
+      MISS_TTFT_MAX: "1000"
+    ports:
+      - "8001:8001"
+
+  backend-1:
+    build:
+      context: .
+      dockerfile: simulator/Dockerfile
+    environment:
+      PORT: "8002"
+      BACKEND_ID: "backend-1"
+      HIT_TTFT_MIN: "80"
+      HIT_TTFT_MAX: "120"
+      MISS_TTFT_MIN: "600"
+      MISS_TTFT_MAX: "1000"
+    ports:
+      - "8002:8002"
+
+  backend-2:
+    build:
+      context: .
+      dockerfile: simulator/Dockerfile
+    environment:
+      PORT: "8003"
+      BACKEND_ID: "backend-2"
+      HIT_TTFT_MIN: "80"
+      HIT_TTFT_MAX: "120"
+      MISS_TTFT_MIN: "600"
+      MISS_TTFT_MAX: "1000"
+    ports:
+      - "8003:8003"
+
+  router:
+    build:
+      context: .
+      dockerfile: router/Dockerfile
+    environment:
+      BACKENDS: "http://backend-0:8001,http://backend-1:8002,http://backend-2:8003"
+      PORT: "8000"
+      LOG_LEVEL: "INFO"
+    ports:
+      - "8000:8000"
+    depends_on:
+      - backend-0
+      - backend-1
+      - backend-2
