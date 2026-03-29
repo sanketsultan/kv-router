@@ -13,9 +13,14 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
+import os
+
 import aiohttp
 
 logger = logging.getLogger("kv-router.pool")
+
+# Ollama uses GET / — vLLM and our fake backends use GET /health
+HEALTH_PATH = os.getenv("HEALTH_PATH", "/health")
 
 
 @dataclass
@@ -124,7 +129,7 @@ class BackendPool:
             await asyncio.sleep(self._health_interval)
 
     async def _check(self, replica: Replica) -> None:
-        url = f"{replica.url}/health"
+        url = f"{replica.url}{HEALTH_PATH}"
         try:
             async with self._session.get(url) as resp:
                 was_healthy = replica.healthy

@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  test:
+    name: Run Tests & Performance Report
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: router/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          pip install -r router/requirements.txt
+          pip install pytest pytest-html
+
+      - name: Start fake backends
+        run: |
+          PORT=8001 BACKEND_ID=backend-0 python3 simulator/fake_backend.py &
+          PORT=8002 BACKEND_ID=backend-1 python3 simulator/fake_backend.py &
+          PORT=8003 BACKEND_ID=backend-2 python3 simulator/fake_backend.py &
+          echo "Backends started"
+
+      - name: Start router
+        run: |
+          cd router
+          BACKENDS="http://localhost:8001,http://localhost:8002,http://localhost:8003" \
+            python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 &
+          echo "Router started"
+
+      - name: Wait for services
+        run: |
+          echo "Waiting for backends..."
+          for port in 8001 8002 8003; do
+            for i in $(seq 1 20); do
+              curl -sf http://localhost:$port/health && break
+              sleep 0.5
+            done
+          done
+          echo "Waiting for router..."
+          for i in $(seq 1 20); do
+            curl -sf http://localhost:8000/health && break
+            sleep 0.5
+          done
+          echo "All services ready"
+
+      - name: Run test suite
+        run: |
+          pytest tests/test_router.py -v \
+            --tb=short \
+            --html=reports/test-report.html \
+            --self-contained-html \
+            -p no:warnings \
+            2>&1 | tee reports/test-output.txt
+
+      - name: Run benchmark
+        run: |
+          ROUTER_URL="http://localhost:8000" \
+            python3 simulator/load_gen.py --mode both --requests 60 \
+            2>&1 | tee reports/benchmark-output.txt
+
+      - name: Print benchmark summary
+        run: cat reports/benchmark-output.txt
+
+      - name: Upload test report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-reports
+          path: reports/
+          retention-days: 30
+
+      - name: Test summary
+        if: always()
+        run: |
+          echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat reports/test-output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "## Benchmark" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat reports/benchmark-output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY

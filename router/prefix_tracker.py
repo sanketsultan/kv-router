@@ -60,18 +60,23 @@ class PrefixTracker:
         """
         Extract the stable, cacheable prefix from a chat message list.
 
-        The prefix is: everything except the last user message, plus the
-        first `prefix_length_chars` chars of the last user message.
-        This mirrors how vLLM identifies reusable KV blocks.
+        The prefix is everything EXCEPT the final user message.
+        This matches how vLLM's prefix cache works: KV blocks are reused
+        for the longest common prefix. The system prompt (and any prior
+        conversation turns) is expensive to prefill and worth caching.
+        The final user turn is unique per request and not cached.
+
+        Examples:
+          [system, user]                  → hash(system)
+          [system, user1, asst1, user2]   → hash(system + user1 + asst1)
         """
         parts = []
         for i, msg in enumerate(messages):
-            role    = msg.get("role", "")
-            content = msg.get("content", "")
+            role = msg.get("role", "")
+            # Skip the final user message — it's unique per request
             if i == len(messages) - 1 and role == "user":
-                # Truncate the final user turn — the rest is unique per request
-                content = content[: self.prefix_length]
-            parts.append(f"{role}:{content}")
+                break
+            parts.append(f"{role}:{msg.get('content', '')}")
         return "\n".join(parts)
 
     def hash_prefix(self, messages: list[dict]) -> str:

@@ -31,7 +31,9 @@ from dataclasses import dataclass, field
 # Config
 # ---------------------------------------------------------------------------
 
-ROUTER_URL   = "http://localhost:8000/v1/chat/completions"
+import os as _os
+_router_base = _os.getenv("ROUTER_URL", "http://localhost:8000")
+ROUTER_URL   = f"{_router_base}/v1/chat/completions"
 BACKEND_URLS = [
     "http://localhost:8001/v1/chat/completions",
     "http://localhost:8002/v1/chat/completions",
