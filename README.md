@@ -1,5 +1,7 @@
 # kv-router — KV-Cache-Aware LLM Router
 
+![CI](https://github.com/sanketsultan/kv-router/actions/workflows/ci.yml/badge.svg)
+
 An OpenAI-compatible load balancer that routes LLM inference requests to the replica most likely to have the relevant **KV cache already computed** — eliminating redundant prefill work across a multi-replica serving cluster.
 
 ## The Problem

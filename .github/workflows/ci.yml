@@ -27,35 +27,37 @@ jobs:
           pip install -r router/requirements.txt
           pip install pytest pytest-html
 
+      - name: Create reports directory
+        run: mkdir -p reports
+
       - name: Start fake backends
         run: |
-          PORT=8001 BACKEND_ID=backend-0 python3 simulator/fake_backend.py &
-          PORT=8002 BACKEND_ID=backend-1 python3 simulator/fake_backend.py &
-          PORT=8003 BACKEND_ID=backend-2 python3 simulator/fake_backend.py &
+          PORT=8001 BACKEND_ID=backend-0 python3 simulator/fake_backend.py > reports/backend-0.log 2>&1 &
+          PORT=8002 BACKEND_ID=backend-1 python3 simulator/fake_backend.py > reports/backend-1.log 2>&1 &
+          PORT=8003 BACKEND_ID=backend-2 python3 simulator/fake_backend.py > reports/backend-2.log 2>&1 &
           echo "Backends started"
 
       - name: Start router
         run: |
           cd router
           BACKENDS="http://localhost:8001,http://localhost:8002,http://localhost:8003" \
-            python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 &
+            python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 > ../reports/router.log 2>&1 &
           echo "Router started"
 
       - name: Wait for services
         run: |
           echo "Waiting for backends..."
           for port in 8001 8002 8003; do
-            for i in $(seq 1 20); do
-              curl -sf http://localhost:$port/health && break
+            for i in $(seq 1 30); do
+              curl -sf http://localhost:$port/health > /dev/null 2>&1 && echo "  :$port ready" && break
               sleep 0.5
             done
           done
           echo "Waiting for router..."
-          for i in $(seq 1 20); do
-            curl -sf http://localhost:8000/health && break
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8000/health > /dev/null 2>&1 && echo "  :8000 ready" && break
             sleep 0.5
           done
-          echo "All services ready"
 
       - name: Run test suite
         run: |
@@ -65,6 +67,8 @@ jobs:
             --self-contained-html \
             -p no:warnings \
             2>&1 | tee reports/test-output.txt
+          # preserve pytest exit code through tee
+          exit ${PIPESTATUS[0]}
 
       - name: Run benchmark
         run: |
@@ -72,10 +76,7 @@ jobs:
             python3 simulator/load_gen.py --mode both --requests 60 \
             2>&1 | tee reports/benchmark-output.txt
 
-      - name: Print benchmark summary
-        run: cat reports/benchmark-output.txt
-
-      - name: Upload test report
+      - name: Upload reports
         uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -83,14 +84,15 @@ jobs:
           path: reports/
           retention-days: 30
 
-      - name: Test summary
+      - name: Write job summary
         if: always()
         run: |
           echo "## Test Results" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          cat reports/test-output.txt >> $GITHUB_STEP_SUMMARY
+          cat reports/test-output.txt 2>/dev/null || echo "No test output found" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
           echo "## Benchmark" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          cat reports/benchmark-output.txt >> $GITHUB_STEP_SUMMARY
+          cat reports/benchmark-output.txt 2>/dev/null || echo "No benchmark output found" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
