@@ -15,12 +15,19 @@ Run:
 """
 
 import json
+import os
 import statistics
 import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+
+# In CI reduce iterations so the suite finishes in reasonable time
+# (CPU-only inference on GitHub runners is ~20-30s/request)
+CI = os.getenv("CI", "false").lower() == "true"
+REPEAT = 1 if CI else 2          # mixed workload repeats
+HIGH_VOL_N = 4 if CI else 10     # high volume request count
 
 # ---------------------------------------------------------------------------
 # Prompts
@@ -248,7 +255,7 @@ class TestHighVolume:
         m     = ollama_stack["metrics"]
 
         results = []
-        for i in range(10):
+        for i in range(HIGH_VOL_N):
             q = FINANCE_QUESTIONS[i % len(FINANCE_QUESTIONS)]
             r = _post(url, model, [
                 {"role": "system", "content": FINANCE_SYSTEM},
@@ -257,13 +264,14 @@ class TestHighVolume:
             results.append(r)
             print(f"  [{i+1:2d}] {r['cache']:4s}  {r['served_by']}  {r['latency_ms']:.0f}ms")
 
-        first_half  = results[:5]
-        second_half = results[5:]
+        half        = HIGH_VOL_N // 2
+        first_half  = results[:half]
+        second_half = results[half:]
         first_hits  = sum(1 for r in first_half  if r["cache"] == "hit")
         second_hits = sum(1 for r in second_half if r["cache"] == "hit")
 
-        print(f"\n  First 5:  {first_hits}/5 hits")
-        print(f"  Second 5: {second_hits}/5 hits")
+        print(f"\n  First {half}:  {first_hits}/{half} hits")
+        print(f"  Second {half}: {second_hits}/{half} hits")
 
         assert second_hits >= first_hits, \
             "Hit rate should not decrease as cache warms up"
@@ -285,9 +293,9 @@ class TestMixedWorkload:
         all_miss_ms   = []
 
         scenarios = [
-            ("Finance (Basel III)",  FINANCE_SYSTEM, FINANCE_QUESTIONS, 2),
-            ("Medical",              MEDICAL_SYSTEM, MEDICAL_QUESTIONS, 2),
-            ("Coding (Python)",      CODING_SYSTEM,  CODING_QUESTIONS,  2),
+            ("Finance (Basel III)",  FINANCE_SYSTEM, FINANCE_QUESTIONS, REPEAT),
+            ("Medical",              MEDICAL_SYSTEM, MEDICAL_QUESTIONS, REPEAT),
+            ("Coding (Python)",      CODING_SYSTEM,  CODING_QUESTIONS,  REPEAT),
         ]
 
         for name, system, questions, repeat in scenarios:

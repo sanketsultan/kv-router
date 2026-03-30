@@ -93,9 +93,9 @@ def running_stack():
 # Ollama stack
 # ---------------------------------------------------------------------------
 
-OLLAMA_URL   = os.getenv("OLLAMA_URL",   "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:1b")
-OLLAMA_ROUTER_PORT = 8020
+OLLAMA_URL         = os.getenv("OLLAMA_URL",         "http://localhost:11434")
+OLLAMA_MODEL       = os.getenv("OLLAMA_MODEL",       "llama3.2:1b")
+OLLAMA_ROUTER_PORT = int(os.getenv("OLLAMA_ROUTER_PORT", "8020"))
 OLLAMA_ROUTER_URL  = f"http://localhost:{OLLAMA_ROUTER_PORT}"
 
 _ollama_metrics: dict = {}

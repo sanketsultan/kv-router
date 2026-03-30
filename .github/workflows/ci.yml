@@ -10,6 +10,7 @@ jobs:
   test:
     name: Run Tests & Performance Report
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -30,51 +31,109 @@ jobs:
       - name: Create reports directory
         run: mkdir -p reports
 
+      # -----------------------------------------------------------------------
+      # Ollama — install + cache model
+      # -----------------------------------------------------------------------
+
+      - name: Install Ollama
+        run: curl -fsSL https://ollama.com/install.sh | sh
+
+      - name: Cache Ollama model
+        uses: actions/cache@v4
+        with:
+          path: ~/.ollama/models
+          key: ollama-llama3.2-1b-v1
+
+      - name: Start Ollama server
+        run: |
+          ollama serve > reports/ollama.log 2>&1 &
+          echo "Waiting for Ollama..."
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:11434 > /dev/null 2>&1 && echo "Ollama ready" && break
+            sleep 1
+          done
+
+      - name: Pull model
+        run: ollama pull llama3.2:1b
+
+      # -----------------------------------------------------------------------
+      # Fake backends + router
+      # -----------------------------------------------------------------------
+
       - name: Start fake backends
         run: |
           PORT=8001 BACKEND_ID=backend-0 python3 simulator/fake_backend.py > reports/backend-0.log 2>&1 &
           PORT=8002 BACKEND_ID=backend-1 python3 simulator/fake_backend.py > reports/backend-1.log 2>&1 &
           PORT=8003 BACKEND_ID=backend-2 python3 simulator/fake_backend.py > reports/backend-2.log 2>&1 &
-          echo "Backends started"
 
-      - name: Start router
+      - name: Start router (fake backends)
         run: |
           cd router
           BACKENDS="http://localhost:8001,http://localhost:8002,http://localhost:8003" \
-            python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 > ../reports/router.log 2>&1 &
-          echo "Router started"
+            python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 > ../reports/router-fake.log 2>&1 &
 
-      - name: Wait for services
+      - name: Start router (Ollama)
         run: |
-          echo "Waiting for backends..."
+          cd router
+          BACKENDS="http://localhost:11434,http://localhost:11434,http://localhost:11434" \
+          HEALTH_PATH="/" \
+            python3 -m uvicorn main:app --host 0.0.0.0 --port 8020 > ../reports/router-ollama.log 2>&1 &
+
+      - name: Wait for all services
+        run: |
           for port in 8001 8002 8003; do
             for i in $(seq 1 30); do
               curl -sf http://localhost:$port/health > /dev/null 2>&1 && echo "  :$port ready" && break
               sleep 0.5
             done
           done
-          echo "Waiting for router..."
-          for i in $(seq 1 30); do
-            curl -sf http://localhost:8000/health > /dev/null 2>&1 && echo "  :8000 ready" && break
-            sleep 0.5
+          for port in 8000 8020; do
+            for i in $(seq 1 30); do
+              curl -sf http://localhost:$port/health > /dev/null 2>&1 && echo "  :$port ready" && break
+              sleep 0.5
+            done
           done
 
-      - name: Run test suite
+      # -----------------------------------------------------------------------
+      # Tests
+      # -----------------------------------------------------------------------
+
+      - name: Run fake backend tests
         run: |
           pytest tests/test_router.py -v \
             --tb=short \
-            --html=reports/test-report.html \
+            --html=reports/test-report-fake.html \
             --self-contained-html \
             -p no:warnings \
-            2>&1 | tee reports/test-output.txt
-          # preserve pytest exit code through tee
+            2>&1 | tee reports/test-output-fake.txt
           exit ${PIPESTATUS[0]}
+
+      - name: Run Ollama integration tests
+        env:
+          OLLAMA_ROUTER_PORT: "8020"
+          CI: "true"
+        run: |
+          pytest tests/test_ollama.py -v -s \
+            --tb=short \
+            --html=reports/test-report-ollama.html \
+            --self-contained-html \
+            -p no:warnings \
+            2>&1 | tee reports/test-output-ollama.txt
+          exit ${PIPESTATUS[0]}
+
+      # -----------------------------------------------------------------------
+      # Benchmark
+      # -----------------------------------------------------------------------
 
       - name: Run benchmark
         run: |
           ROUTER_URL="http://localhost:8000" \
             python3 simulator/load_gen.py --mode both --requests 60 \
             2>&1 | tee reports/benchmark-output.txt
+
+      # -----------------------------------------------------------------------
+      # Reports
+      # -----------------------------------------------------------------------
 
       - name: Upload reports
         uses: actions/upload-artifact@v4
@@ -87,12 +146,17 @@ jobs:
       - name: Write job summary
         if: always()
         run: |
-          echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "## Fake Backend Tests" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          cat reports/test-output.txt 2>/dev/null || echo "No test output found" >> $GITHUB_STEP_SUMMARY
+          cat reports/test-output-fake.txt 2>/dev/null || echo "No output"
           echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## Benchmark" >> $GITHUB_STEP_SUMMARY
+
+          echo "## Ollama Integration Tests" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          cat reports/benchmark-output.txt 2>/dev/null || echo "No benchmark output found" >> $GITHUB_STEP_SUMMARY
+          cat reports/test-output-ollama.txt 2>/dev/null || echo "No output"
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          echo "## Benchmark (Naive vs Cache-Aware)" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat reports/benchmark-output.txt 2>/dev/null || echo "No output"
           echo '```' >> $GITHUB_STEP_SUMMARY
